@@ -9,7 +9,7 @@ Current Memory Scheduling Policies:
 1) FCFS - First Come First Serve
         This scheduling policy schedules memory requests chronologically
 
-2) FRFCFS - Frist Ready First Come First Serve
+2) FRFCFS - First Ready First Come First Serve
         This scheduling policy first checks if a request is READY(meets all 
         timing parameters), if yes then it is prioritized. If multiple requests
         are ready, they they are scheduled chronologically. Otherwise, it 
@@ -77,6 +77,12 @@ public:
 
     Scheduler(Controller<T>* ctrl) : ctrl(ctrl) {}
 
+    /**
+     * @brief do some magic and return a request 
+     * 
+     * @param q 
+     * @return list<Request>::iterator 
+     */
     list<Request>::iterator get_head(list<Request>& q)
     {
         // TODO make the decision at compile time
@@ -154,7 +160,11 @@ public:
         }
     }
 
-//Compare functions for each memory schedulers
+// Compare functions for each memory schedulers
+/**
+ * @brief extra thing for the magic part 
+ * 
+ */
 private:
     typedef list<Request>::iterator ReqIter;
     function<ReqIter(ReqIter, ReqIter)> compare[int(Type::MAX)] = {
@@ -207,7 +217,7 @@ private:
 };
 
 
-// Row Precharge Policy
+// Row pre charge Policy
 template <typename T>
 class RowPolicy
 {
@@ -227,6 +237,10 @@ public:
         return policy[int(type)](cmd);
     }
 
+
+/**
+ * @brief some magic for returning a vector 
+ */
 private:
     function<vector<int>(typename T::Command)> policy[int(Type::MAX)] = {
         // Closed
@@ -286,6 +300,8 @@ public:
     void update(typename T::Command cmd, const vector<int>& addr_vec, long clk)
     {
         auto begin = addr_vec.begin();
+        // TODO : /
+        // no idea why end is computed like this
         auto end = begin + int(T::Level::Row);
         vector<int> rowgroup(begin, end); // bank or subarray
         int row = *end;

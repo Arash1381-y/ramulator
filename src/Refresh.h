@@ -45,7 +45,9 @@ public:
   // ctor
   Refresh(Controller<T>* ctrl) : ctrl(ctrl) {
     clk = refreshed = 0;
+    // get number of ranks
     max_rank_count = ctrl->channel->children.size();
+    // get number of banks
     max_bank_count = ctrl->channel->spec->org_entry.count[(int)T::Level::Bank];
 
     // Init refresh counters

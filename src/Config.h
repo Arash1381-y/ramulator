@@ -15,14 +15,14 @@ class Config {
 
 private:
     std::map<std::string, std::string> options;
-    int channels;
-    int ranks;
-    int subarrays;
-    int cpu_tick;
-    int mem_tick;
-    int core_num = 0;
-    long expected_limit_insts = 0;
-    long warmup_insts = 0;
+    int channels; // number of channels
+    int ranks;    // number of memory ranks
+    int subarrays;// number of subarrays
+    int cpu_tick; // TODO:?
+    int mem_tick; // TODO:?
+    int core_num = 0; // number of cores in CPU
+    long expected_limit_insts = 0; // TODO:?
+    long warmup_insts = 0; //TODO?
 
 public:
     Config() {}

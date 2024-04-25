@@ -452,13 +452,19 @@ bool Trace::get_filtered_request(long& bubble_cnt, long& req_addr, Request::Type
     return true;
 }
 
+/// @brief This function allocate two memory address that is pass as params.
+/// @param req_addr address of a long variable 
+/// @param req_type address of a Type variable 
+/// @return True if reach the end else False 
 bool Trace::get_dramtrace_request(long& req_addr, Request::Type& req_type)
 {
-    string line;
-    getline(file, line);
+  // parsing the line....
     if (file.eof()) {
         return false;
     }
+
+    string line;
+    getline(file, line);
     size_t pos;
     req_addr = std::stoul(line, &pos, 16);
 

@@ -1,3 +1,10 @@
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <stdlib.h>
+#include <functional>
+#include <map>
+
 #include "Processor.h"
 #include "Config.h"
 #include "Controller.h"
@@ -5,12 +12,6 @@
 #include "Memory.h"
 #include "DRAM.h"
 #include "Statistics.h"
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <stdlib.h>
-#include <functional>
-#include <map>
 
 /* Standards */
 #include "Gem5Wrapper.h"
@@ -34,49 +35,71 @@ using namespace ramulator;
 
 bool ramulator::warmup_complete = false;
 
+/**
+ * @brief Directly reads a memory trace file and simulates memory behavior.
+ * 
+ * This function simulates the behavior of memory using a provided memory interface
+ * based on the given memory configuration and a memory trace file.
+ * 
+ * @tparam T Type of the memory interface.
+ * @param configs Memory configuration structure containing parameters
+ *               such as the number of banks, channels, ranks, etc.
+ * @param memory Memory unit with a specified controller.
+ * @param tracename Path to the memory trace file to be used for simulation.
+ */
 template<typename T>
 void run_dramtrace(const Config& configs, Memory<T, Controller>& memory, const char* tracename) {
-
-    /* initialize DRAM trace */
+    // init a tracer object
     Trace trace(tracename);
 
-    /* run simulation */
     bool stall = false, end = false;
-    int reads = 0, writes = 0, clks = 0;
+    int reads = 0, writes = 0;
     long addr = 0;
     Request::Type type = Request::Type::READ;
-    map<int, int> latencies;
-    auto read_complete = [&latencies](Request& r){latencies[r.depart - r.arrive]++;};
 
+    // mapping from time interval to number of occurrence
+    map<int, int> latencies;
+    // lambda function: given request, update latencies map
+    auto read_complete = [&latencies](Request& r){latencies[r.depart - r.arrive]++;};
+    // init a request with an ADDRESS, TYPE=R/W and a callback to update the latency list
     Request req(addr, type, read_complete);
 
+    // loop while there is a memory request that is not issued(!end) or not finished(memory.pending_request)
     while (!end || memory.pending_requests()){
+        // if memory does not stall and there is a request that not is not issued
         if (!end && !stall){
+            // get the next request
             end = !trace.get_dramtrace_request(addr, type);
         }
 
+        // if there is a unread request 
         if (!end){
+            // set addr and type of the new request
             req.addr = addr;
             req.type = type;
+
+            // send the new request to memory
             stall = !memory.send(req);
+
             if (!stall){
+                // update read/writes status variables
                 if (type == Request::Type::READ) reads++;
                 else if (type == Request::Type::WRITE) writes++;
             }
         }
+
         else {
-            memory.set_high_writeq_watermark(0.0f); // make sure that all write requests in the
-                                                    // write queue are drained
+            // block memory to issue a request
+            memory.set_high_writeq_watermark(0.0f); 
         }
 
+        // tick
         memory.tick();
-        clks ++;
         Stats::curTick++; // memory clock, global, for Statistics
     }
     // This a workaround for statistics set only initially lost in the end
     memory.finish();
     Stats::statlist.printall();
-
 }
 
 template <typename T>
@@ -150,21 +173,38 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
     Stats::statlist.printall();
 }
 
+/**
+ * @brief run the simulation based on the given configs and files 
+ * 
+ * @tparam T memory interface
+ * @param configs memory structure
+ * @param spec initialzed T object
+ * @param files trace and config file
+ */
 template<typename T>
 void start_run(const Config& configs, T* spec, const vector<const char*>& files) {
   // initiate controller and memory
   int C = configs.get_channels(), R = configs.get_ranks();
-  // Check and Set channel, rank number
+
+  // set channel and rank number
   spec->set_channel_number(C);
   spec->set_rank_number(R);
+
+  // init channel and its controller 
   std::vector<Controller<T>*> ctrls;
   for (int c = 0 ; c < C ; c++) {
     DRAM<T>* channel = new DRAM<T>(spec, T::Level::Channel);
+    // set channel id
     channel->id = c;
+    // init statistics templates 
     channel->regStats("");
+    // init the controller via the configs and dedicated channel
     Controller<T>* ctrl = new Controller<T>(configs, channel);
+    // push controller
     ctrls.push_back(ctrl);
   }
+
+  // memory is initialized by the list of controllers and the config
   Memory<T, Controller> memory(configs, ctrls);
 
   assert(files.size() != 0);
@@ -175,16 +215,29 @@ void start_run(const Config& configs, T* spec, const vector<const char*>& files)
   }
 }
 
+
+// Driver Code
+/**
+ * @brief Program entry 
+ * 
+ * @param argc number of arguments
+ * @param argv arguments
+ * @return int exist status
+ */
 int main(int argc, const char *argv[])
 {
+    // check if config and trace files are given
     if (argc < 2) {
         printf("Usage: %s <configs-file> --mode=cpu,dram [--stats <filename>] <trace-filename1> <trace-filename2>\n"
             "Example: %s ramulator-configs.cfg --mode=cpu cpu.trace cpu.trace\n", argv[0], argv[0]);
         return 0;
     }
 
+    // init the config using the config file
+    // EXTRA: information like number of banks, 
     Config configs(argv[1]);
 
+    // parsing the options
     const std::string& standard = configs["standard"];
     assert(standard != "" || "DRAM standard should be specified.");
 
@@ -199,6 +252,7 @@ int main(int argc, const char *argv[])
       assert(false);
     }
 
+    // if the ouput path is given use that otherwise use the standard name with .stat suffix 
     int trace_start = 3;
     string stats_out;
     if (strcmp(argv[trace_start], "--stats") == 0) {
@@ -215,6 +269,7 @@ int main(int argc, const char *argv[])
       configs.add("mapping", argv[trace_start+1]);
       trace_start += 2;
     } else {
+      //TODO?: check the mappings
       configs.add("mapping", "defaultmapping");
     }
 

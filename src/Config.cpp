@@ -4,12 +4,15 @@ using namespace std;
 using namespace ramulator;
 
 Config::Config(const std::string& fname) {
+  // constructor call the parser and passing the config file as argument
   parse(fname);
 }
 
 void Config::parse(const string& fname)
 {
+    // get memory details...
     ifstream file(fname);
+    // check if opened successfully
     assert(file.good() && "Bad config file");
     string line;
     while (getline(file, line)) {

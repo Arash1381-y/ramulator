@@ -114,6 +114,8 @@ public:
         int *sz = spec->org_entry.count;
         assert((sz[0] & (sz[0] - 1)) == 0);
         assert((sz[1] & (sz[1] - 1)) == 0);
+
+        // TODO ?: no idea how tx works
         // validate size of one transaction
         int tx = (spec->prefetch_size * spec->channel_width / 8);
         tx_bits = calc_log2(tx);
@@ -278,49 +280,83 @@ public:
       }
     }
 
+    /**
+     * @brief Update the clk for the memory
+     * 
+     * This function trigger all controllers tick and update some
+     * stats of the Ramulator.
+     * 
+     */
     void tick()
     {
+        // increase dram cycles
         ++num_dram_cycles;
         int cur_que_req_num = 0;
         int cur_que_readreq_num = 0;
         int cur_que_writereq_num = 0;
+
+        // for every controller in controllers
         for (auto ctrl : ctrls) {
+          // all current requests: read + write + pendings
           cur_que_req_num += ctrl->readq.size() + ctrl->writeq.size() + ctrl->pending.size();
+          // all read requests: read + pending(pending reqs do not need reactivate) 
           cur_que_readreq_num += ctrl->readq.size() + ctrl->pending.size();
+          // all write requests: write
           cur_que_writereq_num += ctrl->writeq.size();
         }
+
+        // TODO ?: what these 3 variables do
         in_queue_req_num_sum += cur_que_req_num;
         in_queue_read_req_num_sum += cur_que_readreq_num;
         in_queue_write_req_num_sum += cur_que_writereq_num;
 
+        // if there exist a channel which is busy with a 
+        // request
         bool is_active = false;
         for (auto ctrl : ctrls) {
           is_active = is_active || ctrl->is_active();
           ctrl->tick();
         }
+        
         if (is_active) {
           ramulator_active_cycles++;
         }
     }
 
+    /**
+     * @brief send request to the controller.
+     * 
+     * This function send a request to a controller. The address vector of the
+     * request is set by using the memory addr_bits and the possibility of stall
+     * is checked by checking the corresponding queue 
+     * 
+     * @param req new request
+     * @return true if there exist space in corresponding queue 
+     * @return false if there is no space for this request in the queue
+     */
     bool send(Request req)
     {
         req.addr_vec.resize(addr_bits.size());
         long addr = req.addr;
         int coreid = req.coreid;
-
+        
+        // TODO ?: what is tx
         // Each transaction size is 2^tx_bits, so first clear the lowest tx_bits bits
         clear_lower_bits(addr, tx_bits);
 
+
+        // TODO ?: check this later
         if (use_mapping_file){
             apply_mapping(addr, req.addr_vec);
         }
         else {
             switch(int(type)){
+                // specify the channel, rank, bank, row and column of the requested data
                 case int(Type::ChRaBaRoCo):
                     for (int i = addr_bits.size() - 1; i >= 0; i--)
                         req.addr_vec[i] = slice_lower_bits(addr, addr_bits[i]);
                     break;
+                // TODO ?: don't understand this hierarchy
                 case int(Type::RoBaRaCoCh):
                     req.addr_vec[0] = slice_lower_bits(addr, addr_bits[0]);
                     req.addr_vec[addr_bits.size() - 1] = slice_lower_bits(addr, addr_bits[addr_bits.size() - 1]);
@@ -332,16 +368,21 @@ public:
             }
         }
 
+        // 
         if(ctrls[req.addr_vec[0]]->enqueue(req)) {
             // tally stats here to avoid double counting for requests that aren't enqueued
             ++num_incoming_requests;
             if (req.type == Request::Type::READ) {
+              // update core stas
               ++num_read_requests[coreid];
+              // update channel stats
               ++incoming_read_reqs_per_channel[req.addr_vec[int(T::Level::Channel)]];
             }
+
             if (req.type == Request::Type::WRITE) {
               ++num_write_requests[coreid];
             }
+
             ++incoming_requests_per_channel[req.addr_vec[int(T::Level::Channel)]];
             return true;
         }
@@ -591,6 +632,9 @@ private:
     {
         return (((addr >> bit) & 1) == 1);
     }
+    /// @brief remove (bits) lower bits
+    /// @param addr input address
+    /// @param bits number of bits to remove
     void clear_lower_bits(long& addr, int bits)
     {
         addr >>= bits;

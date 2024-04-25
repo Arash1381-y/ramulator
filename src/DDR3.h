@@ -35,22 +35,51 @@ public:
     /*** Command ***/
     enum class Command : int
     { 
-        ACT, PRE, PREA, 
-        RD,  WR,  RDA,  WRA, 
-        REF, PDE, PDX,  SRE, SRX, 
+        ACT,  // activate a row      by Row
+        PRE,  // precharge a (row)   by Bank 
+        PREA, // precharge all banks by Rank
+
+        RD,   // read a row ?? TODO
+        WR,
+        RDA,
+        WRA,
+
+        REF,  // refresh command 
+        PDE,
+        PDX,
+        SRE,
+        SRX, 
         MAX
     };
 
-    string command_name[int(Command::MAX)] = {
-        "ACT", "PRE", "PREA", 
-        "RD",  "WR",  "RDA",  "WRA", 
-        "REF", "PDE", "PDX",  "SRE", "SRX"
+    Level scope[int(Command::MAX)] = {
+        Level::Row,
+        Level::Bank,
+        Level::Rank,   
+        Level::Column,
+        Level::Column,
+        Level::Column, 
+        Level::Column,
+        Level::Rank,
+        Level::Rank,
+        Level::Rank,
+        Level::Rank,
+        Level::Rank
     };
 
-    Level scope[int(Command::MAX)] = {
-        Level::Row,    Level::Bank,   Level::Rank,   
-        Level::Column, Level::Column, Level::Column, Level::Column,
-        Level::Rank,   Level::Rank,   Level::Rank,   Level::Rank,   Level::Rank
+    string command_name[int(Command::MAX)] = {
+        "ACT", 
+        "PRE", 
+        "PREA", 
+        "RD",
+        "WR",
+        "RDA",
+        "WRA", 
+        "REF",
+        "PDE",
+        "PDX",
+        "SRE",
+        "SRX"
     };
 
     bool is_opening(Command cmd) 
@@ -103,8 +132,22 @@ public:
     /* State */
     enum class State : int
     {
-        Opened, Closed, PowerUp, ActPowerDown, PrePowerDown, SelfRefresh, MAX
-    } start[int(Level::MAX)] = {
+        Opened,
+        Closed,
+        PowerUp,
+        ActPowerDown,
+        PrePowerDown,
+        SelfRefresh,
+        MAX
+    };
+    
+    
+    /**
+     * @brief Initial state of each level () 
+     * 
+     */
+    State start[int(Level::MAX)] = {
+        // Channel,        Rank,           Bank,          Row,           Column
         State::MAX, State::PowerUp, State::Closed, State::Closed, State::MAX
     };
 
@@ -117,9 +160,9 @@ public:
     /* Prerequisite */
     function<Command(DRAM<DDR3>*, Command cmd, int)> prereq[int(Level::MAX)][int(Command::MAX)];
 
-    // SAUGATA: added function object container for row hit status
-    /* Row hit */
+    // lambda functions for checking rowhit
     function<bool(DRAM<DDR3>*, Command cmd, int)> rowhit[int(Level::MAX)][int(Command::MAX)];
+
     function<bool(DRAM<DDR3>*, Command cmd, int)> rowopen[int(Level::MAX)][int(Command::MAX)];
 
     /* Timing */
@@ -128,7 +171,7 @@ public:
         Command cmd;
         int dist;
         int val;
-        bool sibling;
+        bool sibling; // TODO ?: not so sure about this vairable
     }; 
     vector<TimingEntry> timing[int(Level::MAX)][int(Command::MAX)];
 
@@ -176,6 +219,12 @@ public:
     int prefetch_size = 8; // 8n prefetch DDR
     int channel_width = 64;
 
+    /**
+    @param CL: CAS Latency. The time it takes between a command having been sent to the memory and when it begins to reply to it. It is the time it takes between the processor asking for some data from the memory and then returning it.
+    @param nRCD: RAS to CAS Delay. The time it takes between the activation of the line (RAS) and the column (CAS) where the data are stored in the matrix.
+    @param nRP: RAS Precharge. The time it takes between disabling the access to a line of data and the beginning of the access to another line of data.
+    @param nRAS: Active to Precharge Delay. How long the memory has to wait until the next access to the memory can be initiated.
+    */
     struct SpeedEntry {
         int rate;
         double freq, tCK;

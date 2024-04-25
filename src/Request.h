@@ -13,8 +13,10 @@ class Request
 {
 public:
     bool is_first_command;
+
+    // each request comes with an ADDRESS
     long addr;
-    // long addr_row;
+    // TODO: ??
     vector<int> addr_vec;
     // specify which core this request sent from, for virtual address translation
     int coreid;
@@ -24,20 +26,26 @@ public:
         READ,
         WRITE,
         REFRESH,
+
+        //TODO ?UNUSED?
         POWERDOWN,
         SELFREFRESH,
         EXTENSION,
         MAX
+        //
     } type;
 
     long arrive = -1;
     long depart = -1;
     function<void(Request&)> callback; // call back with more info
 
+    // CPU TRACE const.
     Request(long addr, Type type, int coreid = 0)
         : is_first_command(true), addr(addr), coreid(coreid), type(type),
       callback([](Request& req){}) {}
 
+    // DRAM TRACE constructor
+    // set i_first_command to TRUE and use READ_MEMORY lambda as a callback function 
     Request(long addr, Type type, function<void(Request&)> callback, int coreid = 0)
         : is_first_command(true), addr(addr), coreid(coreid), type(type), callback(callback) {}
 

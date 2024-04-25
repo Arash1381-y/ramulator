@@ -29,8 +29,10 @@ map<string, enum DDR3::Speed> DDR3::speed_map = {
 
 
 DDR3::DDR3(Org org, Speed speed) :
+    // specify the organisation
     org_entry(org_table[int(org)]),
     speed_entry(speed_table[int(speed)]),
+    // check the speed entry table
     read_latency(speed_entry.nCL + speed_entry.nBL)
 {
     init_speed();
@@ -46,10 +48,25 @@ DDR3::DDR3(const string& org_str, const string& speed_str) :
 {
 }
 
+
+/**
+ * @brief set number of channels
+ * 
+ * this function modify the count[CHANNEL] of org_entry struct.
+ * 
+ * @param channel number of channels in DDR3 memory
+ */
 void DDR3::set_channel_number(int channel) {
   org_entry.count[int(Level::Channel)] = channel;
 }
 
+/**
+ * @brief set number of ranks
+ * 
+ * this function modify the count[RANK] of org_entry struct. 
+ * 
+ * @param rank number of ranks 
+ */
 void DDR3::set_rank_number(int rank) {
   org_entry.count[int(Level::Rank)] = rank;
 }
@@ -95,10 +112,15 @@ void DDR3::init_prereq()
 {
     // RD
     prereq[int(Level::Rank)][int(Command::RD)] = [] (DRAM<DDR3>* node, Command cmd, int id) {
+        // if there is a read request
         switch (int(node->state)) {
+            // if :
+            // the rank is power up then do nothing
             case int(State::PowerUp): return Command::MAX;
+            // the rank is act or pre power down state then just power down 
             case int(State::ActPowerDown): return Command::PDX;
             case int(State::PrePowerDown): return Command::PDX;
+            // the rank need refresh 
             case int(State::SelfRefresh): return Command::SRX;
             default: assert(false);
         }};
@@ -146,8 +168,14 @@ void DDR3::init_prereq()
         }};
 }
 
-
-// SAUGATA: added row hit check functions to see if the desired location is currently open
+/**
+ * @brief init rowhit lambda functions for read and write to the bank
+ * @details if there is a read or write request, check if the bank is open or not
+ * if the bank is closed then there can't be an active row.
+ * if the bank is open then check the if the row id is find in the row state map
+ * if it is found then there is a hit otherwise it is a miss
+ * 
+ */
 void DDR3::init_rowhit()
 {
     // RD
@@ -155,6 +183,7 @@ void DDR3::init_rowhit()
         switch (int(node->state)) {
             case int(State::Closed): return false;
             case int(State::Opened):
+                // if there is an entry in the row state then return true
                 if (node->row_state.find(id) != node->row_state.end())
                     return true;
                 return false;
@@ -165,6 +194,12 @@ void DDR3::init_rowhit()
     rowhit[int(Level::Bank)][int(Command::WR)] = rowhit[int(Level::Bank)][int(Command::RD)];
 }
 
+/**
+ * @brief init rowopen lambda functions for read and write to the bank
+ * @details if there is a read or write request, check if the bank is open or not
+ * if the bank is open then return true otherwise return false
+ * 
+ */
 void DDR3::init_rowopen()
 {
     // RD
@@ -181,25 +216,41 @@ void DDR3::init_rowopen()
 
 void DDR3::init_lambda()
 {
+    // if there was an act command for the bank set the bank state open
+    // and set the corresponding row state open
     lambda[int(Level::Bank)][int(Command::ACT)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Opened;
         node->row_state[id] = State::Opened;};
-    lambda[int(Level::Bank)][int(Command::PRE)] = [] (DRAM<DDR3>* node, int id) {
+
+    // if there was a pre charge command then set the state to closed and
+    // clear the row state
+     lambda[int(Level::Bank)][int(Command::PRE)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Closed;
         node->row_state.clear();};
+    
+    // precharge all rows all banks and close them 
     lambda[int(Level::Rank)][int(Command::PREA)] = [] (DRAM<DDR3>* node, int id) {
         for (auto bank : node->children) {
             bank->state = State::Closed;
             bank->row_state.clear();}};
+
+    // do nothing for refresh, read and write
     lambda[int(Level::Rank)][int(Command::REF)] = [] (DRAM<DDR3>* node, int id) {};
     lambda[int(Level::Bank)][int(Command::RD)] = [] (DRAM<DDR3>* node, int id) {};
     lambda[int(Level::Bank)][int(Command::WR)] = [] (DRAM<DDR3>* node, int id) {};
+
+    // similar to PDE 
+    // TODO : ?
     lambda[int(Level::Bank)][int(Command::RDA)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Closed;
         node->row_state.clear();};
+
+    // similar to WR
     lambda[int(Level::Bank)][int(Command::WRA)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Closed;
         node->row_state.clear();};
+
+    // if there is any open bank in the rank, set it to act power down
     lambda[int(Level::Rank)][int(Command::PDE)] = [] (DRAM<DDR3>* node, int id) {
         for (auto bank : node->children) {
             if (bank->state == State::Closed)
@@ -208,10 +259,16 @@ void DDR3::init_lambda()
             return;
         }
         node->state = State::PrePowerDown;};
+
+
+    // TODO ?
+    // power down exit 
     lambda[int(Level::Rank)][int(Command::PDX)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::PowerUp;};
     lambda[int(Level::Rank)][int(Command::SRE)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::SelfRefresh;};
+    // TODO ?
+    // self refresh exit
     lambda[int(Level::Rank)][int(Command::SRX)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::PowerUp;};
 }
@@ -219,6 +276,7 @@ void DDR3::init_lambda()
 
 void DDR3::init_timing()
 {
+    // TODO ?: understand the timings
     SpeedEntry& s = speed_entry;
     vector<TimingEntry> *t;
 

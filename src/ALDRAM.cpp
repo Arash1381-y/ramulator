@@ -183,15 +183,25 @@ void ALDRAM::init_rowhit()
     rowhit[int(Level::Bank)][int(Command::WR)] = rowhit[int(Level::Bank)][int(Command::RD)];
 }
 
-
+/**
+ * @brief init lambda functions 
+ * @details initiate transition lambda functions for all levels
+ * 
+ */
 void ALDRAM::init_lambda()
 {
+    // if there was an act command for the bank set the bank state open
+    // and set the corresponding row state open
     lambda[int(Level::Bank)][int(Command::ACT)] = [] (DRAM<ALDRAM>* node, int id) {
         node->state = State::Opened;
         node->row_state[id] = State::Opened;};
+    // if there was a pre charge command then set the state to closed and
+    // clear the row state
     lambda[int(Level::Bank)][int(Command::PRE)] = [] (DRAM<ALDRAM>* node, int id) {
         node->state = State::Closed;
         node->row_state.clear();};
+
+    // if there was a 
     lambda[int(Level::Rank)][int(Command::PREA)] = [] (DRAM<ALDRAM>* node, int id) {
         for (auto bank : node->children) {
             bank->state = State::Closed;

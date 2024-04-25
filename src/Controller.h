@@ -68,11 +68,15 @@ protected:
 public:
     /* Member Variables */
     long clk = 0;
+
+
+    // each controller module, controls a single channel/DRAM 
     DRAM<T>* channel;
+
 
     Scheduler<T>* scheduler;  // determines the highest priority request whose commands will be issued
     RowPolicy<T>* rowpolicy;  // determines the row-policy (e.g., closed-row vs. open-row)
-    RowTable<T>* rowtable;  // tracks metadata about rows (e.g., which are open and for how long)
+    RowTable<T>* rowtable;    // tracks metadata about rows (e.g., which are open and for how long)
     Refresh<T>* refresh;
 
     struct Queue {
@@ -81,22 +85,24 @@ public:
         unsigned int size() {return q.size();}
     };
 
-    Queue readq;  // queue for read requests
+    Queue readq;   // queue for read requests
     Queue writeq;  // queue for write requests
-    Queue actq; // read and write requests for which activate was issued are moved to 
+    Queue actq;    // read and write requests for which activate was issued are moved to 
                    // actq, which has higher priority than readq and writeq.
                    // This is an optimization
                    // for avoiding useless activations (i.e., PRECHARGE
                    // after ACTIVATE w/o READ of WRITE command)
     Queue otherq;  // queue for all "other" requests (e.g., refresh)
 
-    deque<Request> pending;  // read requests that are about to receive data from DRAM
-    bool write_mode = false;  // whether write requests should be prioritized over reads
+    deque<Request> pending;         // read requests that are about to receive data from DRAM
+    bool write_mode = false;        // whether write requests should be prioritized over reads
     float wr_high_watermark = 0.8f; // threshold for switching to write mode
-    float wr_low_watermark = 0.2f; // threshold for switching back to read mode
-    //long refreshed = 0;  // last time refresh requests were generated
+    float wr_low_watermark = 0.2f;  // threshold for switching back to read mode
+
+    // long refreshed = 0;  // last time refresh requests were generated
 
     /* Command trace for DRAMPower 3.1 */
+
     string cmd_trace_prefix = "cmd-trace-";
     vector<ofstream> cmd_trace_files;
     bool record_cmd_trace = false;
@@ -110,10 +116,11 @@ public:
         rowpolicy(new RowPolicy<T>(this)),
         rowtable(new RowTable<T>(this)),
         refresh(new Refresh<T>(this)),
+        
         cmd_trace_files(channel->children.size())
     {
-        record_cmd_trace = configs.record_cmd_trace();
-        print_cmd_trace = configs.print_cmd_trace();
+        record_cmd_trace = 1; 
+        print_cmd_trace = 1;
         if (record_cmd_trace){
             if (configs["cmd_trace_prefix"] != "") {
               cmd_trace_prefix = configs["cmd_trace_prefix"];
@@ -301,6 +308,12 @@ public:
     }
 
     /* Member Functions */
+    /**
+     * @brief Get the queue object
+     * 
+     * @param type type of the queue(read or write or other) 
+     * @return Queue& 
+     */
     Queue& get_queue(Request::Type type)
     {
         switch (int(type)) {
@@ -313,15 +326,22 @@ public:
     bool enqueue(Request& req)
     {
         Queue& queue = get_queue(req.type);
+        // TODO ?: why there is a limit for r/w/o queues size
         if (queue.max == queue.size())
             return false;
-
+        
+        // set the arrival time of the request
         req.arrive = clk;
+        // push the request into the queue
         queue.q.push_back(req);
+
         // shortcut for read requests, if a write to same addr exists
         // necessary for coherence
+        //  TODO ?: don't get this completely
         if (req.type == Request::Type::READ && find_if(writeq.q.begin(), writeq.q.end(),
                 [req](Request& wreq){ return req.addr == wreq.addr;}) != writeq.q.end()){
+            // if there is a write request with same addr of the read request, 
+            // use pending queue instead of read queue
             req.depart = clk + 1;
             pending.push_back(req);
             readq.q.pop_back();
@@ -329,26 +349,42 @@ public:
         return true;
     }
 
+    /**
+     * @brief update controller timer and issue a command to memory
+     * 
+     * 
+     */
     void tick()
     {
+        // update the clock 
         clk++;
+        // update the number of elements in different queues
+        // TODO ?: what are the usages of these 3 variables
         req_queue_length_sum += readq.size() + writeq.size() + pending.size();
         read_req_queue_length_sum += readq.size() + pending.size();
         write_req_queue_length_sum += writeq.size();
 
         /*** 1. Serve completed reads ***/
+        // if there is a pending request
         if (pending.size()) {
+            // get first pending request
             Request& req = pending[0];
             if (req.depart <= clk) {
+                // this won't work for shortcut reads (check enqueue function)
                 if (req.depart - req.arrive > 1) { // this request really accessed a row
                   read_latency_sum += req.depart - req.arrive;
+
+
                   channel->update_serving_requests(
                       req.addr_vec.data(), -1, clk);
                 }
                 req.callback(req);
+                // remove request from the queue
                 pending.pop_front();
             }
         }
+        // 2 and 3 are setting the prioritization using the boolean
+        // write_mode
 
         /*** 2. Refresh scheduler ***/
         refresh->tick_ref();
@@ -372,32 +408,46 @@ public:
         Queue* queue = &actq;
         typename T::Command cmd;
         auto req = scheduler->get_head(queue->q);
-
         bool is_valid_req = (req != queue->q.end());
 
         if(is_valid_req) {
+            // first we get a request like read or write
+            // then the controller must take care of the actions
+            // needed for that request
+            // these actions are the cmd(s)
             cmd = get_first_cmd(req);
+            // TODO?: what is the addr_vec
             is_valid_req = is_ready(cmd, req->addr_vec);
         }
-
+        
+        // if the actq does not have a ready command then try read/write queue 
         if (!is_valid_req) {
+
+            // read or write queue
             queue = !write_mode ? &readq : &writeq;
 
+            // if there is otherq than prioritize it over read/write queue
             if (otherq.size())
                 queue = &otherq;  // "other" requests are rare, so we give them precedence over reads/writes
 
+            // get request from scheduler
             req = scheduler->get_head(queue->q);
-
+            // check if the request exist
             is_valid_req = (req != queue->q.end());
 
             if(is_valid_req){
+                // get command from the request
                 cmd = get_first_cmd(req);
+                // check if the given command can be done
                 is_valid_req = is_ready(cmd, req->addr_vec);
             }
         }
-
+        
+        // no command can be execute (no actq or r/w/o queue command)
         if (!is_valid_req) {
             // we couldn't find a command to schedule -- let's try to be speculative
+            // no command can be done
+            // precharge an active row
             auto cmd = T::Command::PRE;
             vector<int> victim = rowpolicy->get_victim(cmd);
             if (!victim.empty()){
@@ -406,12 +456,16 @@ public:
             return;  // nothing more to be done this cycle
         }
 
+        // TODO?: don't know what this block does
+        // there is a command to issue
         if (req->is_first_command) {
             req->is_first_command = false;
             int coreid = req->coreid;
             if (req->type == Request::Type::READ || req->type == Request::Type::WRITE) {
+              //TODO?: check what this function does
               channel->update_serving_requests(req->addr_vec.data(), 1, clk);
             }
+            // TODO?: what is tx? 
             int tx = (channel->spec->prefetch_size * channel->spec->channel_width / 8);
             if (req->type == Request::Type::READ) {
                 if (is_row_hit(req)) {
@@ -426,6 +480,7 @@ public:
                 }
               read_transaction_bytes += tx;
             } else if (req->type == Request::Type::WRITE) {
+                // TODO ?: check the row hit logic
               if (is_row_hit(req)) {
                   ++write_row_hits[coreid];
                   ++row_hits;
@@ -442,7 +497,6 @@ public:
 
         // issue command on behalf of request
         issue_cmd(cmd, get_addr_vec(cmd, req));
-
         // check whether this is the last command (which finishes the request)
         //if (cmd != channel->spec->translate[int(req->type)]){
         if (cmd != channel->spec->translate[int(req->type)]) {
@@ -473,6 +527,8 @@ public:
     bool is_ready(list<Request>::iterator req)
     {
         typename T::Command cmd = get_first_cmd(req);
+        // TODO?: we have a command but we don't know that the system
+        // can execute it right now or not?
         return channel->check(cmd, req->addr_vec.data(), clk);
     }
 
@@ -541,6 +597,8 @@ public:
 private:
     typename T::Command get_first_cmd(list<Request>::iterator req)
     {
+        // sepc is our device let say DDR3
+        // here we are asking our device to
         typename T::Command cmd = channel->spec->translate[int(req->type)];
         return channel->decode(cmd, req->addr_vec.data());
     }
